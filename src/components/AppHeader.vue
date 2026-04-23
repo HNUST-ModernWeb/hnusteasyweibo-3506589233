@@ -26,8 +26,13 @@ function handleThemeToggle() {
       <RouterLink to="/profile" exact-active-class="active">个人主页</RouterLink>
     </nav>
 
-    <button class="ghost-button compact" type="button" @click="handleThemeToggle">
-      切换氛围
-    </button>
+    <div class="header-actions">
+      <RouterLink class="user-pill" to="/profile">
+        {{ store.isAuthenticated.value ? store.profile.value.name : '未登录' }}
+      </RouterLink>
+      <button class="ghost-button compact" type="button" @click="handleThemeToggle">
+        切换氛围
+      </button>
+    </div>
   </header>
 </template>

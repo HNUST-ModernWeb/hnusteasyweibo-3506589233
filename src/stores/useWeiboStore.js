@@ -1,70 +1,29 @@
 import { computed, reactive, toRefs } from 'vue'
+import { apiRequest, assetUrl, uploadFile } from '../api/client'
 
 const STORAGE = {
-  posts: 'hnustEasyWeibo.posts',
-  profile: 'hnustEasyWeibo.profile',
+  token: 'hnustEasyWeibo.authToken',
   theme: 'hnustEasyWeibo.theme'
 }
 
 const defaultProfile = {
   name: '湖科同学',
-  major: '现代 Web 学习者',
-  bio: '喜欢记录课堂灵感、校园日常和一点点没来由的好奇心。',
-  avatar: '/default-avatar.svg'
+  major: '湖南科技大学',
+  bio: '登录后即可发布动态、点赞和评论，记录你的校园日常。',
+  avatar: '/default-avatar.svg',
+  avatarUrl: '/default-avatar.svg'
 }
 
-const seedPosts = [
-  {
-    id: 'seed-1',
-    author: '湖科同学',
-    major: '现代 Web 学习者',
-    avatar: '/default-avatar.svg',
-    content: '今天把 HTML、CSS 和 JavaScript 串起来做了一个简易信息流。原来页面真的可以一点点长出自己的性格。',
-    topic: '学习',
-    visibility: '全校可见',
-    image: '',
-    likes: 12,
-    liked: false,
-    comments: ['页面配色很舒服！', '这个描述有点像课程项目日志。'],
-    createdAt: Date.now() - 1000 * 60 * 36,
-    owned: true
-  },
-  {
-    id: 'seed-2',
-    author: '星湖观察员',
-    major: '校园摄影爱好者',
-    avatar: '/default-avatar.svg',
-    content: '晚饭后操场的风很轻，适合散步，也适合把脑子里打结的 bug 慢慢解开。',
-    topic: '生活',
-    visibility: '全校可见',
-    image: '',
-    likes: 24,
-    liked: false,
-    comments: ['这条动态很有画面感。'],
-    createdAt: Date.now() - 1000 * 60 * 90,
-    owned: false
-  },
-  {
-    id: 'seed-3',
-    author: '前端小组',
-    major: 'Web 课程项目',
-    avatar: '/default-avatar.svg',
-    content: '本周社团分享会主题：如何从静态页面过渡到 Vue 组件。欢迎带着你的页面原型来交流。',
-    topic: '活动',
-    visibility: '仅同学可见',
-    image: '',
-    likes: 31,
-    liked: true,
-    comments: [],
-    createdAt: Date.now() - 1000 * 60 * 150,
-    owned: false
-  }
-]
-
 const state = reactive({
-  posts: loadPosts(),
-  profile: loadProfile(),
-  theme: loadTheme(),
+  posts: [],
+  user: null,
+  profile: { ...defaultProfile },
+  token: readValue(STORAGE.token) || '',
+  theme: readValue(STORAGE.theme) === 'cool' ? 'cool' : 'warm',
+  initialized: false,
+  loading: false,
+  authLoading: false,
+  error: '',
   toast: {
     text: '',
     visible: false
@@ -73,102 +32,236 @@ const state = reactive({
 
 let toastTimer = 0
 
+const isAuthenticated = computed(() => Boolean(state.token && state.user))
+
 const stats = computed(() => ({
   posts: state.posts.length,
   likes: state.posts.reduce((sum, post) => sum + Number(post.likes || 0), 0),
-  comments: state.posts.reduce((sum, post) => sum + normalizedComments(post).length, 0)
+  comments: state.posts.reduce((sum, post) => sum + commentsOf(post).length, 0)
 }))
 
-const ownedPosts = computed(() => state.posts.filter((post) => post.owned))
+const ownedPosts = computed(() => {
+  if (!state.user) {
+    return []
+  }
+
+  return state.posts.filter((post) => post.userId === state.user.id)
+})
 
 export function useWeiboStore() {
   return {
     ...toRefs(state),
     defaultProfile,
+    isAuthenticated,
     stats,
     ownedPosts,
+    initialize,
+    fetchPosts,
+    login,
+    register,
+    logout,
     addPost,
     deletePost,
     toggleLike,
     addComment,
     saveProfile,
     resetProfile,
+    uploadImage,
     toggleTheme,
     showToast
   }
 }
 
-function addPost(payload) {
-  const post = {
-    id: 'post-' + Date.now(),
-    author: state.profile.name,
-    major: state.profile.major,
-    avatar: state.profile.avatar || defaultProfile.avatar,
-    content: payload.content,
-    topic: payload.topic,
-    visibility: payload.visibility,
-    image: payload.image || '',
-    likes: 0,
-    liked: false,
-    comments: [],
-    createdAt: Date.now(),
-    owned: true
-  }
-
-  state.posts.unshift(post)
-  persistPosts()
-  return post
-}
-
-function deletePost(id) {
-  const index = state.posts.findIndex((post) => post.id === id)
-  if (index === -1) {
+async function initialize() {
+  if (state.initialized) {
     return
   }
 
-  state.posts.splice(index, 1)
-  persistPosts()
+  state.loading = true
+  state.error = ''
+  try {
+    if (state.token) {
+      await loadCurrentUser()
+    }
+    await fetchPosts()
+  } catch (error) {
+    state.error = friendlyError(error)
+    if (error.status === 401) {
+      clearAuth()
+    }
+  } finally {
+    state.initialized = true
+    state.loading = false
+  }
 }
 
-function toggleLike(id) {
-  const post = state.posts.find((item) => item.id === id)
-  if (!post) {
-    return
+async function fetchPosts(params = {}) {
+  state.loading = true
+  state.error = ''
+  try {
+    const query = new URLSearchParams()
+    if (params.topic && params.topic !== 'all') {
+      query.set('topic', params.topic)
+    }
+    if (params.keyword) {
+      query.set('keyword', params.keyword)
+    }
+    query.set('page', String(params.page ?? 0))
+    query.set('size', String(params.size ?? 50))
+
+    const posts = await apiRequest(`/api/posts?${query.toString()}`, { token: state.token })
+    state.posts = posts.map(mapPost)
+  } catch (error) {
+    state.error = friendlyError(error)
+    throw error
+  } finally {
+    state.loading = false
+  }
+}
+
+async function login(payload) {
+  state.authLoading = true
+  try {
+    const response = await apiRequest('/api/auth/login', {
+      method: 'POST',
+      body: payload
+    })
+    applyAuth(response)
+    await fetchPosts()
+    showToast('登录成功，欢迎回来。')
+  } finally {
+    state.authLoading = false
+  }
+}
+
+async function register(payload) {
+  state.authLoading = true
+  try {
+    const response = await apiRequest('/api/auth/register', {
+      method: 'POST',
+      body: payload
+    })
+    applyAuth(response)
+    await fetchPosts()
+    showToast('注册成功，欢迎来到湖科微光。')
+  } finally {
+    state.authLoading = false
+  }
+}
+
+async function logout() {
+  if (state.token) {
+    try {
+      await apiRequest('/api/auth/logout', {
+        method: 'POST',
+        token: state.token
+      })
+    } catch (error) {
+      // 退出请求失败不阻塞用户回到未登录状态。
+    }
   }
 
-  post.liked = !post.liked
-  post.likes = Math.max(0, Number(post.likes || 0) + (post.liked ? 1 : -1))
-  persistPosts()
+  clearAuth()
+  await fetchPosts()
+  showToast('已退出登录。')
 }
 
-function addComment(id, text) {
-  const post = state.posts.find((item) => item.id === id)
-  const comment = text.trim()
-  if (!post || !comment) {
-    return false
+async function addPost(payload) {
+  requireAuth()
+  state.loading = true
+  try {
+    let imageUrl = payload.imageUrl || ''
+    if (payload.imageFile) {
+      const upload = await uploadImage(payload.imageFile)
+      imageUrl = upload.url
+    }
+
+    const post = await apiRequest('/api/posts', {
+      method: 'POST',
+      token: state.token,
+      body: {
+        content: payload.content,
+        topic: payload.topic,
+        visibility: payload.visibility,
+        imageUrl
+      }
+    })
+    state.posts = [mapPost(post), ...state.posts]
+    return post
+  } finally {
+    state.loading = false
   }
-
-  post.comments = normalizedComments(post)
-  post.comments.push(comment)
-  persistPosts()
-  return true
 }
 
-function saveProfile(nextProfile) {
-  state.profile = {
-    name: nextProfile.name.trim(),
-    major: nextProfile.major.trim() || defaultProfile.major,
-    bio: nextProfile.bio.trim() || defaultProfile.bio,
-    avatar: nextProfile.avatar || defaultProfile.avatar
+async function deletePost(id) {
+  requireAuth()
+  await apiRequest(`/api/posts/${id}`, {
+    method: 'DELETE',
+    token: state.token
+  })
+  state.posts = state.posts.filter((post) => post.id !== id)
+}
+
+async function toggleLike(id) {
+  requireAuth()
+  const post = await apiRequest(`/api/posts/${id}/like`, {
+    method: 'POST',
+    token: state.token
+  })
+  replacePost(mapPost(post))
+}
+
+async function addComment(id, text) {
+  requireAuth()
+  await apiRequest(`/api/posts/${id}/comments`, {
+    method: 'POST',
+    token: state.token,
+    body: { content: text }
+  })
+  const post = await apiRequest(`/api/posts/${id}`, { token: state.token })
+  replacePost(mapPost(post))
+}
+
+async function saveProfile(nextProfile) {
+  requireAuth()
+  state.authLoading = true
+  try {
+    let avatarUrl = nextProfile.avatarUrl || state.user.avatarUrl || defaultProfile.avatarUrl
+    if (nextProfile.avatarFile) {
+      const upload = await uploadImage(nextProfile.avatarFile)
+      avatarUrl = upload.url
+    }
+
+    const user = await apiRequest('/api/users/me', {
+      method: 'PUT',
+      token: state.token,
+      body: {
+        displayName: nextProfile.name,
+        major: nextProfile.major,
+        bio: nextProfile.bio,
+        avatarUrl
+      }
+    })
+    applyUser(user)
+    await fetchPosts()
+    return user
+  } finally {
+    state.authLoading = false
   }
-
-  syncOwnedPostsProfile()
-  writeJson(STORAGE.profile, state.profile)
-  persistPosts()
 }
 
-function resetProfile() {
-  saveProfile({ ...defaultProfile })
+async function resetProfile() {
+  return saveProfile({
+    name: defaultProfile.name,
+    major: defaultProfile.major,
+    bio: defaultProfile.bio,
+    avatarUrl: defaultProfile.avatarUrl
+  })
+}
+
+async function uploadImage(file) {
+  requireAuth()
+  return uploadFile('/api/uploads', file, state.token)
 }
 
 function toggleTheme() {
@@ -185,95 +278,95 @@ function showToast(text) {
   }, 2400)
 }
 
-function syncOwnedPostsProfile() {
-  state.posts.forEach((post) => {
-    if (!post.owned) {
-      return
-    }
-
-    post.author = state.profile.name
-    post.major = state.profile.major
-    post.avatar = state.profile.avatar
-  })
+async function loadCurrentUser() {
+  const user = await apiRequest('/api/auth/me', { token: state.token })
+  applyUser(user)
 }
 
-function persistPosts() {
-  writeJson(STORAGE.posts, state.posts)
+function applyAuth(response) {
+  state.token = response.token
+  writeValue(STORAGE.token, response.token)
+  applyUser(response.user)
 }
 
-function loadPosts() {
-  const saved = readJson(STORAGE.posts)
-  if (Array.isArray(saved)) {
-    return saved.map(normalizePost)
-  }
-
-  const seeded = clone(seedPosts)
-  writeJson(STORAGE.posts, seeded)
-  return seeded
+function applyUser(user) {
+  state.user = user
+  state.profile = mapProfile(user)
 }
 
-function loadProfile() {
-  const profile = {
-    ...defaultProfile,
-    ...(readJson(STORAGE.profile) || {})
+function clearAuth() {
+  state.token = ''
+  state.user = null
+  state.profile = { ...defaultProfile }
+  removeValue(STORAGE.token)
+}
+
+function replacePost(nextPost) {
+  state.posts = state.posts.map((post) => (post.id === nextPost.id ? nextPost : post))
+}
+
+function mapProfile(user) {
+  if (!user) {
+    return { ...defaultProfile }
   }
 
   return {
-    ...profile,
-    avatar: normalizeAssetPath(profile.avatar)
+    name: user.displayName,
+    major: user.major,
+    bio: user.bio,
+    avatar: assetUrl(user.avatarUrl || defaultProfile.avatarUrl),
+    avatarUrl: user.avatarUrl || defaultProfile.avatarUrl
   }
 }
 
-function loadTheme() {
-  return readValue(STORAGE.theme) === 'cool' ? 'cool' : 'warm'
-}
-
-function normalizePost(post) {
+function mapPost(post) {
   return {
-    id: post.id || 'post-' + Date.now(),
-    author: post.author || defaultProfile.name,
-    major: post.major || defaultProfile.major,
-    avatar: normalizeAssetPath(post.avatar || defaultProfile.avatar),
-    content: post.content || '',
-    topic: post.topic || '学习',
-    visibility: post.visibility || '全校可见',
-    image: post.image || '',
-    likes: Number(post.likes || 0),
-    liked: Boolean(post.liked),
-    comments: normalizedComments(post),
-    createdAt: Number(post.createdAt || Date.now()),
-    owned: Boolean(post.owned)
+    id: post.id,
+    userId: post.userId,
+    author: post.authorName,
+    major: post.authorMajor,
+    avatar: assetUrl(post.authorAvatar || defaultProfile.avatarUrl),
+    content: post.content,
+    topic: post.topic,
+    visibility: post.visibility,
+    image: assetUrl(post.imageUrl || ''),
+    imageUrl: post.imageUrl || '',
+    likes: Number(post.likeCount || 0),
+    liked: Boolean(post.likedByCurrentUser),
+    comments: (post.comments || []).map(mapComment),
+    createdAt: post.createdAt,
+    updatedAt: post.updatedAt,
+    owned: Boolean(state.user && post.userId === state.user.id)
   }
 }
 
-function normalizedComments(post) {
-  return Array.isArray(post.comments) ? post.comments.filter(Boolean) : []
-}
-
-function normalizeAssetPath(path) {
-  if (!path || path === 'default-avatar.svg') {
-    return '/default-avatar.svg'
-  }
-
-  return path
-}
-
-function readJson(key) {
-  const value = readValue(key)
-  if (!value) {
-    return null
-  }
-
-  try {
-    return JSON.parse(value)
-  } catch (error) {
-    removeValue(key)
-    return null
+function mapComment(comment) {
+  return {
+    id: comment.id,
+    userId: comment.userId,
+    authorName: comment.authorName || '同学',
+    authorAvatar: assetUrl(comment.authorAvatar || defaultProfile.avatarUrl),
+    content: comment.content,
+    createdAt: comment.createdAt
   }
 }
 
-function writeJson(key, value) {
-  writeValue(key, JSON.stringify(value))
+function commentsOf(post) {
+  return Array.isArray(post.comments) ? post.comments : []
+}
+
+function requireAuth() {
+  if (!state.token || !state.user) {
+    showToast('请先登录后再操作。')
+    throw new Error('UNAUTHENTICATED')
+  }
+}
+
+function friendlyError(error) {
+  if (error?.message) {
+    return error.message
+  }
+  return '暂时无法连接服务，请稍后再试。'
 }
 
 function readValue(key) {
@@ -298,8 +391,4 @@ function removeValue(key) {
   }
 
   localStorage.removeItem(key)
-}
-
-function clone(value) {
-  return JSON.parse(JSON.stringify(value))
 }

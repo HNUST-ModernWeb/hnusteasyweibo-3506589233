@@ -1,16 +1,21 @@
 <script setup>
 import { computed, ref } from 'vue'
+import { useRouter } from 'vue-router'
+import EmptyState from '../components/EmptyState.vue'
 import { useWeiboStore } from '../stores/useWeiboStore'
 
 const store = useWeiboStore()
+const router = useRouter()
 
 const content = ref('')
 const topic = ref('学习')
 const visibility = ref('全校可见')
 const selectedImage = ref('')
+const selectedFile = ref(null)
 const message = ref('')
 const messageType = ref('')
 const fileInput = ref(null)
+const submitting = ref(false)
 
 const topics = ['学习', '生活', '活动', '失物招领']
 const visibilities = ['全校可见', '仅同学可见', '仅自己可见']
@@ -30,6 +35,7 @@ function handleImageChange(event) {
     return
   }
 
+  selectedFile.value = file
   const reader = new FileReader()
   reader.addEventListener('load', () => {
     selectedImage.value = reader.result
@@ -40,6 +46,7 @@ function handleImageChange(event) {
 
 function clearImage() {
   selectedImage.value = ''
+  selectedFile.value = null
   if (fileInput.value) {
     fileInput.value.value = ''
   }
@@ -53,7 +60,7 @@ function resetForm() {
   setMessage('')
 }
 
-function submitPost() {
+async function submitPost() {
   const text = content.value.trim()
 
   if (text.length < 5) {
@@ -61,14 +68,22 @@ function submitPost() {
     return
   }
 
-  store.addPost({
-    content: text,
-    topic: topic.value,
-    visibility: visibility.value,
-    image: selectedImage.value
-  })
-  store.showToast('发布成功，已经保存到首页信息流。')
-  resetForm()
+  submitting.value = true
+  try {
+    await store.addPost({
+      content: text,
+      topic: topic.value,
+      visibility: visibility.value,
+      imageFile: selectedFile.value
+    })
+    store.showToast('发布成功，已经出现在校园信息流。')
+    resetForm()
+    router.push('/')
+  } catch (error) {
+    setMessage(error.message || '发布失败，请稍后重试。')
+  } finally {
+    submitting.value = false
+  }
 }
 
 function setMessage(text, type = 'error') {
@@ -77,13 +92,14 @@ function setMessage(text, type = 'error') {
 }
 
 function trimText(text, maxLength) {
-  return text.length > maxLength ? text.slice(0, maxLength) + '...' : text
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text
 }
 
 function formatTime(timestamp) {
-  const minutes = Math.max(1, Math.floor((Date.now() - Number(timestamp)) / 60000))
-  if (minutes < 60) {
-    return `${minutes} 分钟前`
+  const time = typeof timestamp === 'number' ? timestamp : Date.parse(timestamp)
+  const minutes = Math.max(1, Math.floor((Date.now() - time) / 60000))
+  if (Number.isNaN(minutes) || minutes < 60) {
+    return `${Number.isNaN(minutes) ? 1 : minutes} 分钟前`
   }
 
   return `${Math.floor(minutes / 60)} 小时前`
@@ -91,12 +107,21 @@ function formatTime(timestamp) {
 </script>
 
 <template>
-  <main class="page-grid">
+  <main v-if="!store.isAuthenticated.value" class="page-grid">
+    <EmptyState
+      title="请先登录"
+      description="登录后就可以发布动态和上传图片，让同学们看到你的校园瞬间。"
+      action-text="去登录"
+      action-to="/profile"
+    />
+  </main>
+
+  <main v-else class="page-grid">
     <section class="form-panel reveal">
-      <p class="eyebrow">CREATE POST</p>
+      <p class="eyebrow">发布动态</p>
       <h1>发布一条校园动态</h1>
       <p class="section-lead">
-        支持文字、话题分类、可见范围和本地图片预览。发布后会保存到浏览器本地，并出现在首页和个人主页。
+        写下想分享的校园瞬间，可以配一张图片，让这条动态更有画面感。
       </p>
 
       <form class="post-form" @submit.prevent="submitPost">
@@ -132,7 +157,7 @@ function formatTime(timestamp) {
         <label class="upload-zone" for="post-image">
           <input id="post-image" ref="fileInput" type="file" accept="image/*" @change="handleImageChange">
           <span>上传图片</span>
-          <small>选择一张本地图片，页面会实时预览</small>
+          <small>图片会先预览，发布后随动态一起展示</small>
         </label>
 
         <div v-if="selectedImage" class="image-preview">
@@ -143,14 +168,16 @@ function formatTime(timestamp) {
         <p class="form-message" :class="messageType" role="alert">{{ message }}</p>
 
         <div class="form-actions">
-          <button class="primary-button" type="submit">发布动态</button>
+          <button class="primary-button" type="submit" :disabled="submitting">
+            {{ submitting ? '发布中...' : '发布动态' }}
+          </button>
           <button class="ghost-button" type="button" @click="resetForm">清空</button>
         </div>
       </form>
     </section>
 
     <aside class="preview-panel reveal">
-      <p class="eyebrow">PREVIEW</p>
+      <p class="eyebrow">发布预览</p>
       <h2>实时预览</h2>
       <article class="post-card preview-card">
         <header class="post-header">

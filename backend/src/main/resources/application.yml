@@ -1,0 +1,26 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: hnust-easy-weibo-backend
+  datasource:
+    url: ${WEIBO_DB_URL:jdbc:mysql://localhost:3306/hnust_easy_weibo?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&createDatabaseIfNotExist=true}
+    username: ${WEIBO_DB_USERNAME:root}
+    password: ${WEIBO_DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  sql:
+    init:
+      mode: always
+      schema-locations: classpath:schema.sql
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+
+app:
+  auth:
+    token-days: 7
+  uploads:
+    dir: uploads
+    max-size-bytes: 5242880

@@ -11,6 +11,10 @@ node_modules/
 # 构建输出
 dist/
 build/
+.gradle/
+backend/.gradle/
+backend/build/
+backend/uploads/
 
 # 日志文件
 *.log

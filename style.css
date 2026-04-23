@@ -824,6 +824,89 @@ h3 {
     transform: translateY(0);
 }
 
+.header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.user-pill {
+    display: inline-flex;
+    align-items: center;
+    min-height: 38px;
+    max-width: 150px;
+    padding: 0 14px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    color: var(--accent-strong);
+    background: rgba(255, 255, 255, 0.62);
+    font-weight: 900;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.status-card {
+    padding: 18px 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    color: var(--muted);
+    background: rgba(255, 255, 255, 0.62);
+    font-weight: 800;
+    box-shadow: 0 14px 34px rgba(23, 50, 77, 0.06);
+}
+
+.status-card.error {
+    color: var(--danger);
+    background: rgba(255, 235, 228, 0.78);
+}
+
+.auth-panel {
+    padding: 28px;
+    border: 1px solid rgba(255, 255, 255, 0.62);
+    border-radius: var(--radius-xl);
+    background: var(--panel);
+    box-shadow: var(--shadow);
+    backdrop-filter: blur(18px);
+}
+
+.auth-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    margin: 20px 0 8px;
+    padding: 5px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.56);
+}
+
+.auth-tabs button {
+    min-height: 40px;
+    border: 0;
+    border-radius: 999px;
+    color: var(--muted);
+    background: transparent;
+    font-weight: 900;
+}
+
+.auth-tabs button.active {
+    color: #ffffff;
+    background: var(--text);
+}
+
+.logout-button {
+    margin-top: 18px;
+}
+
+.primary-button:disabled,
+.ghost-button:disabled,
+.action-button:disabled,
+.comment-form button:disabled {
+    cursor: not-allowed;
+    opacity: 0.62;
+    transform: none;
+}
+
 .reveal {
     animation: reveal-up 0.68s ease both;
 }
@@ -871,8 +954,13 @@ h3 {
     .profile-layout,
     .composer-card,
     .feed-toolbar,
-    .section-heading {
+    .section-heading,
+    .header-actions {
         display: grid;
+    }
+
+    .header-actions {
+        grid-template-columns: 1fr auto;
     }
 
     .site-header {

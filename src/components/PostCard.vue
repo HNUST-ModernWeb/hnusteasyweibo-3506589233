@@ -11,32 +11,55 @@ const props = defineProps({
 
 const store = useWeiboStore()
 const commentText = ref('')
+const busy = ref(false)
 
-function handleLike() {
-  store.toggleLike(props.post.id)
+async function handleLike() {
+  await runAction(() => store.toggleLike(props.post.id))
 }
 
-function handleDelete() {
+async function handleDelete() {
   if (!window.confirm('确定删除这条动态吗？')) {
     return
   }
 
-  store.deletePost(props.post.id)
-  store.showToast('动态已删除。')
+  await runAction(async () => {
+    await store.deletePost(props.post.id)
+    store.showToast('动态已删除。')
+  })
 }
 
-function handleComment() {
+async function handleComment() {
   const text = commentText.value.trim()
   if (!text) {
     return
   }
 
-  store.addComment(props.post.id, text)
-  commentText.value = ''
+  await runAction(async () => {
+    await store.addComment(props.post.id, text)
+    commentText.value = ''
+  })
+}
+
+async function runAction(action) {
+  busy.value = true
+  try {
+    await action()
+  } catch (error) {
+    if (error.message !== 'UNAUTHENTICATED') {
+      store.showToast(error.message || '操作失败，请稍后重试。')
+    }
+  } finally {
+    busy.value = false
+  }
 }
 
 function formatTime(timestamp) {
-  const diff = Date.now() - Number(timestamp)
+  const time = typeof timestamp === 'number' ? timestamp : Date.parse(timestamp)
+  if (Number.isNaN(time)) {
+    return '刚刚'
+  }
+
+  const diff = Date.now() - time
   const minutes = Math.max(1, Math.floor(diff / 60000))
 
   if (minutes < 60) {
@@ -71,11 +94,11 @@ function formatTime(timestamp) {
     </div>
 
     <footer class="post-actions">
-      <button class="action-button" :class="{ liked: post.liked }" type="button" @click="handleLike">
+      <button class="action-button" :class="{ liked: post.liked }" type="button" :disabled="busy" @click="handleLike">
         {{ post.liked ? '已点赞' : '点赞' }} {{ post.likes }}
       </button>
       <button class="action-button" type="button" @click="$refs.commentInput?.focus()">评论</button>
-      <button v-if="post.owned" class="action-button danger" type="button" @click="handleDelete">删除</button>
+      <button v-if="post.owned" class="action-button danger" type="button" :disabled="busy" @click="handleDelete">删除</button>
     </footer>
 
     <form class="comment-form" @submit.prevent="handleComment">
@@ -84,15 +107,16 @@ function formatTime(timestamp) {
         v-model="commentText"
         type="text"
         maxlength="80"
-        placeholder="写一句友善的评论..."
+        :placeholder="store.isAuthenticated.value ? '写一句友善的评论...' : '登录后可以评论'"
         aria-label="评论内容"
+        :disabled="busy || !store.isAuthenticated.value"
       >
-      <button type="submit">发送</button>
+      <button type="submit" :disabled="busy || !store.isAuthenticated.value">发送</button>
     </form>
 
     <div class="comment-list">
-      <div v-for="(comment, index) in post.comments" :key="`${post.id}-comment-${index}`" class="comment">
-        <strong>同学：</strong>{{ comment }}
+      <div v-for="(comment, index) in post.comments" :key="comment.id || `${post.id}-comment-${index}`" class="comment">
+        <strong>{{ comment.authorName || '同学' }}：</strong>{{ comment.content }}
       </div>
     </div>
   </article>

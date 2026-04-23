@@ -1,5 +1,5 @@
 <script setup>
-import { watchEffect } from 'vue'
+import { onMounted, watchEffect } from 'vue'
 import { RouterView } from 'vue-router'
 import AppHeader from './components/AppHeader.vue'
 import ToastMessage from './components/ToastMessage.vue'
@@ -13,6 +13,10 @@ watchEffect(() => {
   }
 
   document.body.classList.toggle('cool-theme', store.theme.value === 'cool')
+})
+
+onMounted(() => {
+  store.initialize()
 })
 </script>
 

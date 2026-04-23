@@ -1,0 +1,17 @@
+pluginManagement {
+    repositories {
+        maven { url = uri("https://repo.spring.io/milestone") }
+        gradlePluginPortal()
+        mavenCentral()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        maven { url = uri("https://repo.spring.io/milestone") }
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'hnust-easy-weibo-backend'
